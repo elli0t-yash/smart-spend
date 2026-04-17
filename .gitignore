@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Env / secrets
+.env
+*.env
+
+# Node
+node_modules/
+.next/
+out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data / bank statements
+data/
+
+# Claude Code local settings
+.claude/
+
+# Misc
+*.log
+tmp/
