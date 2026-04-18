@@ -68,6 +68,18 @@ interface Suggestion {
   text: string;
 }
 
+interface SpendingScore {
+  score: number;
+  label: string;
+}
+
+interface BiggestLeak {
+  merchant: string;
+  amount: number;
+  count: number;
+  pct: number;
+}
+
 interface LlmReport {
   narrative: string;
   fun_facts: string[];
@@ -76,6 +88,8 @@ interface LlmReport {
 interface Result {
   total_spent: number;
   total_received: number;
+  savings: number;
+  savings_rate: number;
   debit_count: number;
   credit_count: number;
   categories: Category[];
@@ -90,6 +104,9 @@ interface Result {
   behavior_patterns: BehaviorPattern[];
   leakage: Leakage[];
   suggestions: Suggestion[];
+  spending_score?: SpendingScore;
+  smart_alert?: string | null;
+  biggest_leak?: BiggestLeak | null;
   bank_name?: string;
 }
 
@@ -125,6 +142,14 @@ function fmtDate(iso: string) {
   });
 }
 
+/* ─── Score color ────────────────────────────────────────── */
+function scoreColor(score: number) {
+  if (score >= 8.5) return "#4ade80";
+  if (score >= 7)   return "#a3e635";
+  if (score >= 5.5) return "#fbbf24";
+  return "#f87171";
+}
+
 /* ─── Section heading ────────────────────────────────────── */
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
@@ -155,6 +180,118 @@ function StatCard({
         {value}
       </p>
       {sub && <p className="text-xs" style={{ color: "#8888aa" }}>{sub}</p>}
+    </div>
+  );
+}
+
+/* ─── Smart Alert ────────────────────────────────────────── */
+function SmartAlert({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div
+      className="rounded-2xl px-5 py-3.5 mb-6 flex items-center justify-between gap-3"
+      style={{ background: "#fbbf2415", border: "1px solid #fbbf2440" }}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className="text-lg">🔔</span>
+        <p className="text-sm" style={{ color: "#fde68a" }}>{message}</p>
+      </div>
+      <button onClick={onDismiss} className="flex-shrink-0 text-xs opacity-50 hover:opacity-100" style={{ color: "#fde68a" }}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
+/* ─── Savings Banner ─────────────────────────────────────── */
+function SavingsBanner({ earned, spent, savings, savingsRate }: {
+  earned: number; spent: number; savings: number; savingsRate: number;
+}) {
+  const isPositive = savings >= 0;
+  return (
+    <div
+      className="rounded-2xl p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4"
+      style={{ background: "#1a1a24", border: "1px solid #2e2e3e" }}
+    >
+      <div className="flex-1">
+        <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#8888aa" }}>
+          Income vs Expenses
+        </p>
+        <p className="text-sm leading-relaxed" style={{ color: "#c8c8e0" }}>
+          You earned{" "}
+          <span className="font-bold" style={{ color: "#4ade80" }}>{fmt(earned)}</span>
+          {" "}and spent{" "}
+          <span className="font-bold" style={{ color: "#f87171" }}>{fmt(spent)}</span>
+          {" "}→ {isPositive ? "saved" : "overspent by"}{" "}
+          <span className="font-bold" style={{ color: isPositive ? "#4ade80" : "#f87171" }}>
+            {fmt(Math.abs(savings))}
+          </span>
+          {isPositive && (
+            <span style={{ color: "#8888aa" }}> ({savingsRate}%)</span>
+          )}
+        </p>
+      </div>
+      <div className="flex gap-6">
+        <div className="text-center">
+          <p className="text-xs mb-1" style={{ color: "#8888aa" }}>Earned</p>
+          <p className="text-lg font-bold" style={{ color: "#4ade80" }}>{fmt(earned)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs mb-1" style={{ color: "#8888aa" }}>Spent</p>
+          <p className="text-lg font-bold" style={{ color: "#f87171" }}>{fmt(spent)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-xs mb-1" style={{ color: "#8888aa" }}>{isPositive ? "Saved" : "Over"}</p>
+          <p className="text-lg font-bold" style={{ color: isPositive ? "#4ade80" : "#f87171" }}>
+            {fmt(Math.abs(savings))}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Biggest Leak ───────────────────────────────────────── */
+function BiggestLeakCard({ leak }: { leak: BiggestLeak }) {
+  return (
+    <div
+      className="rounded-2xl p-5 mb-8 flex items-center gap-4"
+      style={{ background: "#1a1a24", border: "1px solid #f8717130" }}
+    >
+      <span className="text-3xl flex-shrink-0">🔥</span>
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#f87171" }}>
+          Biggest Money Drain
+        </p>
+        <p className="text-base font-bold" style={{ color: "#e8e8f0" }}>
+          {leak.merchant}{" "}
+          <span style={{ color: "#f87171" }}>{fmt(leak.amount)}</span>
+          <span className="text-sm font-normal ml-2" style={{ color: "#8888aa" }}>
+            across {leak.count} transactions ({leak.pct}%)
+          </span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Spending Score ─────────────────────────────────────── */
+function SpendingScoreBadge({ score, label }: SpendingScore) {
+  const color = scoreColor(score);
+  return (
+    <div className="flex items-center gap-2 flex-shrink-0">
+      <div
+        className="flex flex-col items-center justify-center rounded-2xl px-4 py-2"
+        style={{ background: color + "15", border: `1px solid ${color}40` }}
+      >
+        <span className="text-2xl font-bold leading-none" style={{ color }}>
+          {score}
+        </span>
+        <span className="text-xs mt-0.5" style={{ color: color + "cc" }}>/10</span>
+      </div>
+      <div>
+        <p className="text-xs font-semibold" style={{ color }}>{label}</p>
+        <p className="text-xs" style={{ color: "#8888aa" }}>Spending Score</p>
+      </div>
     </div>
   );
 }
@@ -329,6 +466,8 @@ export default function ResultsPage() {
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [alertDismissed, setAlertDismissed] = useState(false);
+  const [timelineView, setTimelineView] = useState(false);
   const reportRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -382,7 +521,10 @@ export default function ResultsPage() {
               {result.bank_name && ` · ${result.bank_name}`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {result.spending_score && (
+              <SpendingScoreBadge {...result.spending_score} />
+            )}
             <button
               onClick={handleDownload}
               disabled={downloading}
@@ -413,6 +555,26 @@ export default function ResultsPage() {
             </button>
           </div>
         </div>
+
+        {/* Smart Alert */}
+        {result.smart_alert && !alertDismissed && (
+          <SmartAlert message={result.smart_alert} onDismiss={() => setAlertDismissed(true)} />
+        )}
+
+        {/* Savings Banner */}
+        {result.total_received > 0 && (
+          <SavingsBanner
+            earned={result.total_received}
+            spent={result.total_spent}
+            savings={result.savings}
+            savingsRate={result.savings_rate}
+          />
+        )}
+
+        {/* Biggest Leak */}
+        {result.biggest_leak && (
+          <BiggestLeakCard leak={result.biggest_leak} />
+        )}
 
         {/* Spending Personality */}
         {result.personality?.length > 0 && (
@@ -541,21 +703,42 @@ export default function ResultsPage() {
         {/* Transactions */}
         <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #2e2e3e" }}>
           <div
-            className="px-5 py-4 flex items-center justify-between"
+            className="px-5 py-4 flex items-center justify-between gap-3 flex-wrap"
             style={{ background: "#1a1a24", borderBottom: "1px solid #2e2e3e" }}
           >
-            <h2 className="font-semibold text-sm" style={{ color: "#e8e8f0" }}>
-              Transactions
+            <div className="flex items-center gap-2">
+              <h2 className="font-semibold text-sm" style={{ color: "#e8e8f0" }}>
+                Transactions
+              </h2>
               {activeCategory && (
                 <span
-                  className="ml-2 text-xs px-2 py-0.5 rounded-full"
+                  className="text-xs px-2 py-0.5 rounded-full"
                   style={{ background: "#7c6af730", color: "#a59bff" }}
                 >
                   {activeCategory}
                   <button onClick={() => setActiveCategory(null)} className="ml-1 opacity-70 hover:opacity-100">×</button>
                 </span>
               )}
-            </h2>
+              {/* View toggle */}
+              <div
+                className="flex rounded-lg overflow-hidden ml-2"
+                style={{ border: "1px solid #2e2e3e" }}
+              >
+                {(["List", "Timeline"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setTimelineView(v === "Timeline")}
+                    className="px-2.5 py-1 text-xs font-medium transition-colors"
+                    style={{
+                      background: (v === "Timeline") === timelineView ? "#2e2e3e" : "transparent",
+                      color: (v === "Timeline") === timelineView ? "#e8e8f0" : "#8888aa",
+                    }}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -569,7 +752,55 @@ export default function ResultsPage() {
               <p className="text-sm text-center py-10" style={{ color: "#8888aa" }}>
                 No transactions found.
               </p>
+            ) : timelineView ? (
+              // ── Timeline view ──────────────────────────────────────
+              (() => {
+                const byDate = filteredTxns.reduce<Record<string, Transaction[]>>((acc, t) => {
+                  (acc[t.date] = acc[t.date] ?? []).push(t);
+                  return acc;
+                }, {});
+                return Object.keys(byDate)
+                  .sort((a, b) => b.localeCompare(a))
+                  .map((date) => (
+                    <div key={date}>
+                      <div
+                        className="px-5 py-2 text-xs font-semibold sticky top-0"
+                        style={{ background: "#131318", color: "#8888aa", borderBottom: "1px solid #1a1a24" }}
+                      >
+                        {fmtDate(date)}
+                        <span className="ml-2 font-normal">
+                          {fmt(byDate[date].filter(t => t.type === "debit").reduce((s, t) => s + t.amount, 0))} spent
+                        </span>
+                      </div>
+                      {byDate[date].map((t, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between px-5 py-3"
+                          style={{ borderBottom: "1px solid #1a1a24" }}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div
+                              className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                              style={{ background: "#1a1a24", color: t.type === "credit" ? "#4ade80" : "#e8e8f0" }}
+                            >
+                              {t.merchant.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate" style={{ color: "#e8e8f0" }}>{t.merchant}</p>
+                              <p className="text-xs" style={{ color: "#8888aa" }}>{t.category}</p>
+                            </div>
+                          </div>
+                          <p className="text-sm font-semibold flex-shrink-0 ml-4"
+                            style={{ color: t.type === "credit" ? "#4ade80" : "#f87171" }}>
+                            {t.type === "credit" ? "+" : "−"}{fmt(t.amount)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ));
+              })()
             ) : (
+              // ── List view ──────────────────────────────────────────
               filteredTxns.map((t, i) => (
                 <div
                   key={i}
@@ -588,10 +819,8 @@ export default function ResultsPage() {
                       <p className="text-xs" style={{ color: "#8888aa" }}>{t.category} · {fmtDate(t.date)}</p>
                     </div>
                   </div>
-                  <p
-                    className="text-sm font-semibold flex-shrink-0 ml-4"
-                    style={{ color: t.type === "credit" ? "#4ade80" : "#f87171" }}
-                  >
+                  <p className="text-sm font-semibold flex-shrink-0 ml-4"
+                    style={{ color: t.type === "credit" ? "#4ade80" : "#f87171" }}>
                     {t.type === "credit" ? "+" : "−"}{fmt(t.amount)}
                   </p>
                 </div>

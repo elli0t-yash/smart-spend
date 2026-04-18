@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime
+from typing import Optional
 
 
 # ── Personality classification ─────────────────────────────────────────────────
@@ -258,6 +259,127 @@ def _generate_suggestions(
     return suggestions[:4]
 
 
+# ── Spending score ─────────────────────────────────────────────────────────────
+
+def _compute_spending_score(
+    total_spent: float,
+    total_received: float,
+    categories: list[dict],
+    weekend_spend: float,
+    weekday_spend: float,
+    debits: list[dict],
+) -> dict:
+    score = 10.0
+
+    # Savings rate (-3 max)
+    if total_received > 0:
+        savings_rate = (total_received - total_spent) / total_received
+        if savings_rate < 0:
+            score -= 3
+        elif savings_rate < 0.10:
+            score -= 2
+        elif savings_rate < 0.20:
+            score -= 1
+
+    # Food % (-2 max)
+    food_pct = next((c["pct"] for c in categories if c["name"] == "Food & Dining"), 0)
+    if food_pct > 40:
+        score -= 2
+    elif food_pct > 30:
+        score -= 1
+    elif food_pct > 20:
+        score -= 0.5
+
+    # Weekend spike (-1.5 max)
+    weekend_avg = weekend_spend / 2
+    weekday_avg = weekday_spend / 5 if weekday_spend else 0
+    if weekday_avg > 0:
+        if weekend_avg > weekday_avg * 2:
+            score -= 1.5
+        elif weekend_avg > weekday_avg * 1.5:
+            score -= 0.5
+
+    # Impulse spends (-1.5 max)
+    if debits:
+        small_ratio = sum(1 for d in debits if d["amount"] < 300) / len(debits)
+        if small_ratio > 0.6:
+            score -= 1.5
+        elif small_ratio > 0.4:
+            score -= 0.5
+
+    score = round(max(1.0, min(10.0, score)), 1)
+
+    if score >= 8.5:
+        label = "Excellent"
+    elif score >= 7.0:
+        label = "Good"
+    elif score >= 5.5:
+        label = "Average"
+    else:
+        label = "Needs Work"
+
+    return {"score": score, "label": label}
+
+
+# ── Smart alert ────────────────────────────────────────────────────────────────
+
+def _generate_smart_alert(
+    weekend_spend: float,
+    weekday_spend: float,
+    total_spent: float,
+    total_received: float,
+    merchant_totals: dict[str, float],
+) -> Optional[str]:
+    weekend_avg = weekend_spend / 2
+    weekday_avg = weekday_spend / 5 if weekday_spend else 0
+
+    if weekday_avg > 0 and weekend_avg > weekday_avg * 2:
+        ratio = weekend_avg / weekday_avg
+        return f"You spent {ratio:.1f}x more per day on weekends than weekdays."
+
+    if total_received > 0 and total_spent > total_received:
+        excess = total_spent - total_received
+        return f"You spent ₹{excess:,.0f} more than you earned this period."
+
+    if total_spent > 0 and merchant_totals:
+        top_m, top_amt = max(merchant_totals.items(), key=lambda x: x[1])
+        pct = top_amt / total_spent * 100
+        if pct > 25:
+            return f"{top_m} alone accounts for {pct:.0f}% of your total spending."
+
+    return None
+
+
+# ── Biggest leak ───────────────────────────────────────────────────────────────
+
+_SKIP_LEAK_CATS = {"Transfer / P2P", "Salary", "Interest / Returns"}
+
+def _find_biggest_leak(
+    debits: list[dict],
+    merchant_totals: dict[str, float],
+    merchant_counts: dict[str, int],
+    total_spent: float,
+) -> Optional[dict]:
+    # Top merchant excluding internal/salary categories
+    candidates = [
+        (m, amt)
+        for m, amt in merchant_totals.items()
+        if not any(
+            d["merchant"] == m and d.get("category", "") in _SKIP_LEAK_CATS
+            for d in debits
+        )
+    ]
+    if not candidates:
+        return None
+    top_m, top_amt = max(candidates, key=lambda x: x[1])
+    return {
+        "merchant": top_m,
+        "amount": round(top_amt, 2),
+        "count": merchant_counts.get(top_m, 0),
+        "pct": round(top_amt / total_spent * 100, 1) if total_spent else 0,
+    }
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def generate_insights(transactions: list[dict]) -> dict:
@@ -311,6 +433,10 @@ def generate_insights(transactions: list[dict]) -> dict:
     weekend_spend = sum(v for k, v in dow_totals.items() if k in ("Saturday", "Sunday"))
     weekday_spend = total_spent - weekend_spend
 
+    # Savings
+    savings = round(total_received - total_spent, 2)
+    savings_rate = round(savings / total_received * 100, 1) if total_received else 0
+
     # Behavioural analysis
     personality = _classify_personality(
         categories, weekend_spend, weekday_spend,
@@ -325,6 +451,15 @@ def generate_insights(transactions: list[dict]) -> dict:
         behavior_patterns, leakage, categories,
         merchant_totals, merchant_counts, total_spent,
     )
+    spending_score = _compute_spending_score(
+        total_spent, total_received, categories,
+        weekend_spend, weekday_spend, debits,
+    )
+    smart_alert = _generate_smart_alert(
+        weekend_spend, weekday_spend, total_spent,
+        total_received, merchant_totals,
+    )
+    biggest_leak = _find_biggest_leak(debits, merchant_totals, merchant_counts, total_spent)
 
     # Legacy insight cards (kept for compatibility)
     cards = _build_cards(
@@ -335,6 +470,8 @@ def generate_insights(transactions: list[dict]) -> dict:
     return {
         "total_spent": round(total_spent, 2),
         "total_received": round(total_received, 2),
+        "savings": savings,
+        "savings_rate": savings_rate,
         "debit_count": len(debits),
         "credit_count": len(credits),
         "categories": categories,
@@ -350,6 +487,9 @@ def generate_insights(transactions: list[dict]) -> dict:
         "behavior_patterns": behavior_patterns,
         "leakage": leakage,
         "suggestions": suggestions,
+        "spending_score": spending_score,
+        "smart_alert": smart_alert,
+        "biggest_leak": biggest_leak,
     }
 
 
