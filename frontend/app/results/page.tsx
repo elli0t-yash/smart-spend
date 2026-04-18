@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   PieChart,
@@ -290,11 +290,57 @@ const PieTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ n
 };
 
 /* ─── Page ───────────────────────────────────────────────── */
+async function downloadPdf(el: HTMLElement, filename: string) {
+  const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+    import("jspdf"),
+    import("html2canvas"),
+  ]);
+
+  const canvas = await html2canvas(el, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: "#0f0f13",
+  });
+
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const imgW = pageW;
+  const imgH = (canvas.height * pageW) / canvas.width;
+
+  let remaining = imgH;
+  let offset = 0;
+
+  pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, offset, imgW, imgH);
+  remaining -= pageH;
+
+  while (remaining > 0) {
+    offset -= pageH;
+    pdf.addPage();
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, offset, imgW, imgH);
+    remaining -= pageH;
+  }
+
+  pdf.save(filename);
+}
+
 export default function ResultsPage() {
   const [result, setResult] = useState<Result | null>(null);
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  async function handleDownload() {
+    if (!reportRef.current || !result) return;
+    setDownloading(true);
+    try {
+      await downloadPdf(reportRef.current, "smart-spend-report.pdf");
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   useEffect(() => {
     const raw = sessionStorage.getItem("smart-spend-result");
@@ -323,7 +369,7 @@ export default function ResultsPage() {
 
   return (
     <main className="flex-1 min-h-screen px-4 py-10" style={{ background: "#0f0f13" }}>
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-5xl mx-auto" ref={reportRef}>
 
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -336,13 +382,36 @@ export default function ResultsPage() {
               {result.bank_name && ` · ${result.bank_name}`}
             </p>
           </div>
-          <button
-            onClick={() => router.push("/")}
-            className="rounded-xl px-4 py-2 text-sm font-medium"
-            style={{ background: "#1a1a24", border: "1px solid #2e2e3e", color: "#8888aa" }}
-          >
-            ← New upload
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              className="rounded-xl px-4 py-2 text-sm font-medium flex items-center gap-2 transition-colors"
+              style={{
+                background: downloading ? "#2e2e3e" : "#7c6af7",
+                color: downloading ? "#8888aa" : "#fff",
+                cursor: downloading ? "not-allowed" : "pointer",
+              }}
+            >
+              {downloading ? (
+                "Generating…"
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 16l-6-6h4V4h4v6h4l-6 6zM4 20h16v-2H4v2z" fill="currentColor"/>
+                  </svg>
+                  Download PDF
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => router.push("/")}
+              className="rounded-xl px-4 py-2 text-sm font-medium"
+              style={{ background: "#1a1a24", border: "1px solid #2e2e3e", color: "#8888aa" }}
+            >
+              ← New upload
+            </button>
+          </div>
         </div>
 
         {/* Spending Personality */}
