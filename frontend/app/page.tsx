@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 export default function UploadPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [bank, setBank] = useState("auto");
   const [password, setPassword] = useState("");
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -58,6 +59,7 @@ export default function UploadPage() {
       const form = new FormData();
       form.append("file", file);
       form.append("password", password);
+      form.append("bank", bank);
 
       const res = await fetch("http://localhost:8000/analyze", {
         method: "POST",
@@ -136,10 +138,39 @@ export default function UploadPage() {
                 Drop your bank statement here
               </p>
               <p className="text-xs mt-1" style={{ color: "#8888aa" }}>
-                PDF format · HDFC Bank statements supported
+                PDF format · HDFC, SBI, ICICI, Axis, Kotak
               </p>
             </div>
           )}
+        </div>
+
+        {/* Bank selector */}
+        <div className="mb-4">
+          <label
+            className="block text-xs font-medium mb-1.5"
+            style={{ color: "#8888aa" }}
+          >
+            Bank
+          </label>
+          <select
+            value={bank}
+            onChange={(e) => setBank(e.target.value)}
+            className="w-full rounded-xl px-4 py-3 text-sm outline-none transition-colors appearance-none"
+            style={{
+              background: "#1a1a24",
+              border: "1px solid #2e2e3e",
+              color: "#e8e8f0",
+            }}
+            onFocus={(e) => (e.target.style.borderColor = "#7c6af7")}
+            onBlur={(e) => (e.target.style.borderColor = "#2e2e3e")}
+          >
+            <option value="auto">Auto-detect</option>
+            <option value="hdfc">HDFC Bank</option>
+            <option value="sbi">State Bank of India</option>
+            <option value="icici">ICICI Bank</option>
+            <option value="axis">Axis Bank</option>
+            <option value="kotak">Kotak Mahindra Bank</option>
+          </select>
         </div>
 
         {/* Password */}
