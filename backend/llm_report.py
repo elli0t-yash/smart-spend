@@ -6,24 +6,25 @@ from openai import OpenAI
 _CLIENT = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
 
 _SYSTEM = (
-    "You are a sharp personal finance analyst. "
+    "You are a sharp behavioral finance analyst. "
     "You receive structured spending data and return concise, specific JSON insights. "
-    "Always use ₹ for amounts and be direct."
+    "Focus on behavior — patterns, habits, and what the numbers reveal about the person. "
+    "Always use ₹ for amounts. Be direct, specific, and avoid generic advice."
 )
 
 _PROMPT_TEMPLATE = """\
-Analyze this bank statement data and return JSON only — no markdown, no extra text.
+Analyze this spending behavior data and return JSON only — no markdown, no extra text.
 
-Spending data:
+Data:
 {data}
 
 Return this exact JSON shape:
 {{
-  "narrative": "<2–3 sentence summary of the person's spending habits, using specific numbers>",
+  "narrative": "<2–3 sentences describing this person's spending behavior using specific numbers. Mention their dominant pattern, a surprising observation, and one concrete implication.>",
   "fun_facts": [
-    "<surprising or interesting observation 1 with a specific number>",
-    "<surprising or interesting observation 2 with a specific number>",
-    "<surprising or interesting observation 3 with a specific number>"
+    "<specific behavioral observation 1 with a number — e.g. frequency, ratio, or comparison>",
+    "<specific behavioral observation 2 with a number>",
+    "<specific behavioral observation 3 with a number>"
   ]
 }}"""
 
@@ -38,6 +39,9 @@ def generate_llm_report(insights: dict) -> dict:
         "biggest_spending_day": insights["biggest_spending_day"],
         "weekend_vs_weekday": insights["weekend_vs_weekday"],
         "spend_by_dow": insights["spend_by_dow"],
+        "personality": insights.get("personality", []),
+        "behavior_patterns": insights.get("behavior_patterns", []),
+        "leakage": insights.get("leakage", []),
     }
 
     response = _CLIENT.chat.completions.create(

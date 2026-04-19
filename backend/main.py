@@ -12,7 +12,7 @@ from gmail_auth import exchange_code, get_auth_url
 from gmail_fetcher import fetch_transactions
 from insights import generate_insights
 from llm_report import generate_llm_report
-from parser import parse_hdfc_pdf
+from parser import parse_statement, SUPPORTED_BANKS
 
 app = FastAPI(title="Smart Spend API")
 
@@ -35,28 +35,37 @@ def _build_result(transactions: list[dict]) -> dict:
 
 
 @app.post("/analyze")
-async def analyze(file: UploadFile = File(...), password: str = Form("")):
+async def analyze(file: UploadFile = File(...), password: str = Form(""), bank: str = Form("auto")):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    if bank not in ("auto", *SUPPORTED_BANKS):
+        raise HTTPException(status_code=400, detail=f"Unsupported bank: {bank}")
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 
     try:
-        transactions = parse_hdfc_pdf(tmp_path, password=password)
+        transactions, detected_bank = parse_statement(tmp_path, password=password, bank=bank)
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Failed to parse PDF: {str(e)}")
     finally:
         os.unlink(tmp_path)
 
     if not transactions:
-        raise HTTPException(status_code=422, detail="No transactions found in the statement.")
+        raise HTTPException(
+            status_code=422,
+            detail="No transactions found. Make sure you selected the correct bank.",
+        )
 
     for t in transactions:
         t["category"] = categorize(t["merchant"], t["narration"])
 
-    return _build_result(transactions)
+    result = _build_result(transactions)
+    result["bank"] = detected_bank
+    result["bank_name"] = SUPPORTED_BANKS.get(detected_bank, "Unknown Bank")
+    return result
 
 
 # ── Gmail endpoints ────────────────────────────────────────────────────────────
