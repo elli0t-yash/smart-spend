@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from categorizer import categorize
 from gmail_auth import exchange_code, get_auth_url
 from gmail_fetcher import fetch_transactions
+from graph_builder import build_merchant_graph
 from insights import generate_insights
 from llm_report import generate_llm_report
 from parser import parse_statement, SUPPORTED_BANKS
@@ -27,6 +28,7 @@ app.add_middleware(
 def _build_result(transactions: list[dict]) -> dict:
     result = generate_insights(transactions)
     result["transactions"] = transactions
+    result["graph"] = build_merchant_graph(transactions)
     try:
         result["llm_report"] = generate_llm_report(result)
     except Exception:

@@ -5,3 +5,12 @@ python-multipart==0.0.9
 openai
 requests
 python-dotenv
+
+# Phase 1 – NER-based merchant extraction
+spacy>=3.7.0
+
+# Phase 2 – Semantic categorization
+sentence-transformers>=2.7.0
+
+# Phase 3 – Merchant knowledge graph
+networkx>=3.3

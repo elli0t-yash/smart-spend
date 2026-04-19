@@ -2,6 +2,7 @@ import re
 from datetime import date, datetime
 from typing import Optional
 import pdfplumber
+from nlp_extractor import ner_extract_merchant
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -114,9 +115,16 @@ def _extract_generic_merchant(narration: str) -> str:
 
 
 def extract_merchant(narration: str, bank: str = "hdfc") -> str:
-    if bank == "hdfc":
-        return _extract_hdfc_merchant(narration)
-    return _extract_generic_merchant(narration)
+    result = _extract_hdfc_merchant(narration) if bank == "hdfc" else _extract_generic_merchant(narration)
+
+    # Phase 1: NER fallback — if regex produced a noisy long string, try spaCy
+    _looks_weak = len(result) > 35 or result.isupper() or "/" in result
+    if _looks_weak:
+        ner_result = ner_extract_merchant(narration)
+        if ner_result:
+            return ner_result
+
+    return result
 
 
 # ── Bank detection ─────────────────────────────────────────────────────────────
