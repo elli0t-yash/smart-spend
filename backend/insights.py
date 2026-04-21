@@ -380,6 +380,47 @@ def _find_biggest_leak(
     }
 
 
+# ── Subscription leakage ──────────────────────────────────────────────────────
+
+def _detect_subscription_leakage(transactions: list[dict]) -> list[dict]:
+    subs = [t for t in transactions if t.get("email_type") == "subscription"]
+    if not subs:
+        return []
+    by_merchant: dict[str, list] = defaultdict(list)
+    for t in subs:
+        by_merchant[t["merchant"]].append(t)
+    result = []
+    for merchant, txns in by_merchant.items():
+        total = sum(t["amount"] for t in txns)
+        result.append({
+            "merchant": merchant,
+            "amount": round(total, 2),
+            "count": len(txns),
+            "frequency": txns[0].get("frequency", "monthly"),
+        })
+    return sorted(result, key=lambda x: -x["amount"])
+
+
+# ── Food item behavior ─────────────────────────────────────────────────────────
+
+def _analyze_food_items(transactions: list[dict]) -> dict:
+    food_txns = [
+        t for t in transactions
+        if t.get("email_type") == "ecommerce" and t.get("merchant") in ("Swiggy", "Zomato")
+    ]
+    if not food_txns:
+        return {}
+    item_counts: dict[str, int] = defaultdict(int)
+    for t in food_txns:
+        for item in t.get("items", []):
+            item_counts[item.strip().lower()] += 1
+    top_items = sorted(item_counts.items(), key=lambda x: -x[1])[:5]
+    return {
+        "order_count": len(food_txns),
+        "top_items": [{"name": name.title(), "count": count} for name, count in top_items],
+    }
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def generate_insights(transactions: list[dict]) -> dict:
@@ -460,6 +501,8 @@ def generate_insights(transactions: list[dict]) -> dict:
         total_received, merchant_totals,
     )
     biggest_leak = _find_biggest_leak(debits, merchant_totals, merchant_counts, total_spent)
+    subscription_leakage = _detect_subscription_leakage(transactions)
+    food_behavior = _analyze_food_items(transactions)
 
     # Legacy insight cards (kept for compatibility)
     cards = _build_cards(
@@ -490,6 +533,8 @@ def generate_insights(transactions: list[dict]) -> dict:
         "spending_score": spending_score,
         "smart_alert": smart_alert,
         "biggest_leak": biggest_leak,
+        "subscription_leakage": subscription_leakage,
+        "food_behavior": food_behavior,
     }
 
 

@@ -85,6 +85,36 @@ interface LlmReport {
   fun_facts: string[];
 }
 
+/* ─── Graph types ────────────────────────────────────────── */
+interface GraphNodeData {
+  id: string;
+  total: number;
+  count: number;
+  category: string;
+  community: number;
+  centrality: number;
+}
+
+interface GraphEdgeData {
+  source: string;
+  target: string;
+  weight: number;
+}
+
+interface GraphData {
+  nodes: GraphNodeData[];
+  edges: GraphEdgeData[];
+  stats: {
+    total_merchants: number;
+    total_connections: number;
+    num_communities: number;
+    top_by_spend: string[];
+    most_connected: string[];
+    communities: Array<{ id: number; members: string[] }>;
+  };
+  nlp_ready: boolean;
+}
+
 interface Result {
   total_spent: number;
   total_received: number;
@@ -108,6 +138,7 @@ interface Result {
   smart_alert?: string | null;
   biggest_leak?: BiggestLeak | null;
   bank_name?: string;
+  graph?: GraphData;
 }
 
 /* ─── Helpers ────────────────────────────────────────────── */
@@ -426,6 +457,179 @@ const PieTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ n
   );
 };
 
+/* ─── Merchant Knowledge Graph ───────────────────────────── */
+const COMMUNITY_COLORS = [
+  "#7c6af7", "#f87171", "#4ade80", "#fbbf24",
+  "#60a5fa", "#fb923c", "#34d399", "#a78bfa",
+  "#f472b6", "#2dd4bf",
+];
+
+interface SimNode extends GraphNodeData {
+  x: number; y: number;
+  vx: number; vy: number;
+  r: number;
+}
+
+function MerchantGraph({ graph }: { graph: GraphData }) {
+  const frameRef = useRef<number>(0);
+  const simRef = useRef<SimNode[]>([]);
+  const nodeMapRef = useRef<Map<string, SimNode>>(new Map());
+  const [nodes, setNodes] = useState<SimNode[]>([]);
+  const [tooltip, setTooltip] = useState<{ node: SimNode; x: number; y: number } | null>(null);
+
+  const W = 700, H = 400;
+
+  useEffect(() => {
+    if (!graph.nodes.length) return;
+    const maxTotal = Math.max(...graph.nodes.map((n) => n.total), 1);
+
+    const sim: SimNode[] = graph.nodes.map((n) => ({
+      ...n,
+      x: W / 2 + (Math.random() - 0.5) * 200,
+      y: H / 2 + (Math.random() - 0.5) * 200,
+      vx: 0, vy: 0,
+      r: Math.max(14, Math.min(42, (n.total / maxTotal) * 42)),
+    }));
+    simRef.current = sim;
+    const nm = new Map(sim.map((n) => [n.id, n]));
+    nodeMapRef.current = nm;
+
+    const tick = () => {
+      const ns = simRef.current;
+      const damping = 0.82, repulsion = 4000, springLen = 130, springK = 0.018, centerK = 0.006;
+      ns.forEach((n) => { n.vx *= damping; n.vy *= damping; });
+      ns.forEach((n) => { n.vx += (W / 2 - n.x) * centerK; n.vy += (H / 2 - n.y) * centerK; });
+      for (let i = 0; i < ns.length; i++) {
+        for (let j = i + 1; j < ns.length; j++) {
+          const a = ns[i], b = ns[j];
+          const dx = b.x - a.x || 0.01, dy = b.y - a.y || 0.01;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const f = repulsion / (dist * dist);
+          a.vx -= (dx / dist) * f; a.vy -= (dy / dist) * f;
+          b.vx += (dx / dist) * f; b.vy += (dy / dist) * f;
+        }
+      }
+      graph.edges.forEach((e) => {
+        const a = nm.get(e.source), b = nm.get(e.target);
+        if (!a || !b) return;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const f = (dist - springLen) * springK * Math.min(e.weight, 3);
+        a.vx += (dx / dist) * f; a.vy += (dy / dist) * f;
+        b.vx -= (dx / dist) * f; b.vy -= (dy / dist) * f;
+      });
+      ns.forEach((n) => {
+        n.x = Math.max(n.r + 8, Math.min(W - n.r - 8, n.x + n.vx));
+        n.y = Math.max(n.r + 8, Math.min(H - n.r - 8, n.y + n.vy));
+      });
+      setNodes([...ns]);
+      frameRef.current = requestAnimationFrame(tick);
+    };
+    frameRef.current = requestAnimationFrame(tick);
+    const stop = setTimeout(() => cancelAnimationFrame(frameRef.current), 4000);
+    return () => { cancelAnimationFrame(frameRef.current); clearTimeout(stop); };
+  }, [graph]);
+
+  if (!graph.nodes.length) return null;
+  const nm = nodeMapRef.current;
+
+  return (
+    <div className="rounded-2xl p-5 mb-8" style={{ background: "#1a1a24", border: "1px solid #2e2e3e" }}>
+      <div className="flex items-center gap-2 mb-1">
+        <SectionHeading>Merchant Knowledge Graph</SectionHeading>
+        <span
+          className="ml-auto text-xs px-2 py-0.5 rounded-full mb-3"
+          style={{ background: "#4ade8020", color: "#4ade80", border: "1px solid #4ade8040" }}
+        >
+          GraphNLP
+        </span>
+      </div>
+      <p className="text-xs mb-4" style={{ color: "#8888aa" }}>
+        Merchants used on the same day are connected · node size = spend · color = detected cluster
+      </p>
+
+      {/* Stats strip */}
+      <div className="flex gap-6 mb-4">
+        {[
+          { label: "Merchants", value: graph.stats.total_merchants },
+          { label: "Connections", value: graph.stats.total_connections },
+          { label: "Clusters", value: graph.stats.num_communities },
+          { label: "Hub", value: graph.stats.most_connected[0] ?? "—" },
+        ].map((s) => (
+          <div key={s.label}>
+            <p className="text-base font-bold" style={{ color: "#e8e8f0" }}>{s.value}</p>
+            <p className="text-xs" style={{ color: "#8888aa" }}>{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Force-directed graph */}
+      <div className="relative overflow-hidden rounded-xl" style={{ background: "#0f0f13" }}>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+          {graph.edges.map((e, i) => {
+            const a = nm.get(e.source), b = nm.get(e.target);
+            if (!a || !b) return null;
+            return (
+              <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                stroke="#2e2e3e" strokeWidth={Math.min(3, e.weight)} strokeOpacity={0.7} />
+            );
+          })}
+          {nodes.map((n) => {
+            const color = COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length];
+            return (
+              <g key={n.id} style={{ cursor: "pointer" }}
+                onMouseEnter={(ev) => setTooltip({ node: n, x: ev.clientX, y: ev.clientY })}
+                onMouseLeave={() => setTooltip(null)}
+              >
+                <circle cx={n.x} cy={n.y} r={n.r} fill={color + "28"} stroke={color} strokeWidth={1.5} />
+                {n.r >= 18 && (
+                  <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="middle"
+                    style={{ fontSize: Math.min(10, n.r * 0.45), fill: color, userSelect: "none", pointerEvents: "none" }}>
+                    {n.id.length > 11 ? n.id.slice(0, 10) + "…" : n.id}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        {tooltip && (
+          <div className="fixed z-50 rounded-xl px-3 py-2 text-xs shadow-xl pointer-events-none"
+            style={{ left: tooltip.x + 14, top: tooltip.y - 12,
+              background: "#22222e", border: "1px solid #2e2e3e", color: "#e8e8f0" }}>
+            <p className="font-semibold mb-0.5">{tooltip.node.id}</p>
+            <p style={{ color: "#8888aa" }}>{tooltip.node.category}</p>
+            <p style={{ color: "#a59bff" }}>{fmt(tooltip.node.total)} · {tooltip.node.count} txns</p>
+            <p style={{ color: "#8888aa" }}>Centrality: {(tooltip.node.centrality * 100).toFixed(0)}%</p>
+          </div>
+        )}
+      </div>
+
+      {/* Cluster pills */}
+      {graph.stats.communities?.length > 1 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#8888aa" }}>
+            Detected Clusters
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {graph.stats.communities.slice(0, 6).map((c) => {
+              const color = COMMUNITY_COLORS[c.id % COMMUNITY_COLORS.length];
+              return (
+                <div key={c.id} className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs"
+                  style={{ background: color + "18", border: `1px solid ${color}40`, color }}>
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+                  {c.members.slice(0, 3).join(", ")}
+                  {c.members.length > 3 && <span style={{ opacity: 0.6 }}> +{c.members.length - 3}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Page ───────────────────────────────────────────────── */
 async function downloadPdf(el: HTMLElement, filename: string) {
   const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
@@ -699,6 +903,11 @@ export default function ResultsPage() {
 
         {/* AI Report */}
         {result.llm_report && <AiReport report={result.llm_report} />}
+
+        {/* Merchant Knowledge Graph */}
+        {result.graph?.nlp_ready && result.graph.nodes.length > 0 && (
+          <MerchantGraph graph={result.graph} />
+        )}
 
         {/* Transactions */}
         <div className="rounded-2xl overflow-hidden" style={{ border: "1px solid #2e2e3e" }}>
