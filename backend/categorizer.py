@@ -1,3 +1,10 @@
+"""
+Categorization pipeline:
+  1. Keyword rules (fast, reliable for known merchants)
+  2. Semantic fallback via sentence-transformers (Phase 2 — handles unknown merchants)
+"""
+from nlp_categorizer import semantic_categorize
+
 RULES: list[tuple[str, list[str]]] = [
     ("Food & Dining", ["swiggy", "zomato", "dunzo", "blinkit", "bigbasket", "grofers", "zepto", "instamart", "restaurant", "cafe", "hotel", "dhaba", "kitchen", "food", "aishwarya super", "premaenterprise", "peersab", "mamatha market", "manoj b s"]),
     ("Transport", ["uber", "ola", "rapido", "yulu", "metro", "irctc", "redbus", "makemytrip", "goibibo", "indigo", "spicejet", "air india", "bus", "cab", "taxi", "auto"]),
@@ -13,9 +20,24 @@ RULES: list[tuple[str, list[str]]] = [
 DEFAULT_CATEGORY = "Other"
 
 
-def categorize(merchant: str, narration: str) -> str:
-    text = (merchant + " " + narration).lower()
+def _keyword_categorize(text: str) -> str | None:
     for category, keywords in RULES:
         if any(kw in text for kw in keywords):
             return category
+    return None
+
+
+def categorize(merchant: str, narration: str) -> str:
+    text = (merchant + " " + narration).lower()
+
+    # Phase 1: keyword rules (fast path)
+    result = _keyword_categorize(text)
+    if result:
+        return result
+
+    # Phase 2: semantic similarity (handles unknown merchants)
+    semantic = semantic_categorize(text)
+    if semantic:
+        return semantic
+
     return DEFAULT_CATEGORY
